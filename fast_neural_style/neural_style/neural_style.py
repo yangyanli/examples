@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import re
+from tqdm import tqdm
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -122,35 +124,61 @@ def train(args):
 def stylize(args):
     device = torch.device("cuda" if args.cuda else "cpu")
 
-    content_image = utils.load_image(args.content_image, scale=args.content_scale)
-    content_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Lambda(lambda x: x.mul(255))
-    ])
-    content_image = content_transform(content_image)
-    content_image = content_image.unsqueeze(0).to(device)
-
-    if args.model.endswith(".onnx"):
-        output = stylize_onnx(content_image, args)
+    image_extensions = ['.jpg', '.jpeg', '.png']
+    if os.path.isfile(args.content_image):
+        content_files = [args.content_image]
     else:
-        with torch.no_grad():
-            style_model = TransformerNet()
-            state_dict = torch.load(args.model)
-            # remove saved deprecated running_* keys in InstanceNorm from the checkpoint
-            for k in list(state_dict.keys()):
-                if re.search(r'in\d+\.running_(mean|var)$', k):
-                    del state_dict[k]
-            style_model.load_state_dict(state_dict)
-            style_model.to(device)
-            style_model.eval()
-            if args.export_onnx:
-                assert args.export_onnx.endswith(".onnx"), "Export model file should end with .onnx"
-                output = torch.onnx._export(
-                    style_model, content_image, args.export_onnx, opset_version=11,
-                ).cpu()            
-            else:
-                output = style_model(content_image).cpu()
-    utils.save_image(args.output_image, output[0])
+        content_files = [os.path.join(args.content_image, f) for f in os.listdir(args.content_image) if
+                         os.path.splitext(f)[-1].lower() in image_extensions]
+    if os.path.isfile(args.model):
+        model_files = [args.model]
+    else:
+        model_files = [os.path.join(args.model, f) for f in os.listdir(args.model) if
+                       f.endswith('.pth') or f.endswith('.onnx')]
+
+    with tqdm(total=len(content_files) * len(model_files)) as pbar:
+        for content_file in content_files:
+            content_image = utils.load_image(content_file, scale=args.content_scale)
+            content_transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x.mul(255))
+            ])
+            content_image = content_transform(content_image)
+            content_image = content_image.unsqueeze(0).to(device)
+
+            for model_file in model_files:
+                if len(content_files) == 1 and len(model_files) == 1:
+                    output_file = args.output_image
+                else:
+                    content = os.path.splitext(os.path.basename(content_file))[0]
+                    style = os.path.splitext(os.path.basename(model_file))[0]
+                    output_file = os.path.join(args.output_image, content + '+' + style + '.png')
+
+                pbar.set_description('%s-generating %s...' % (datetime.now().strftime('%H:%M:%S.%f'), output_file))
+                pbar.update(1)
+
+                if args.model.endswith(".onnx"):
+                    args.model = model_file
+                    output = stylize_onnx(content_image, args)
+                else:
+                    with torch.no_grad():
+                        style_model = TransformerNet()
+                        state_dict = torch.load(model_file)
+                        # remove saved deprecated running_* keys in InstanceNorm from the checkpoint
+                        for k in list(state_dict.keys()):
+                            if re.search(r'in\d+\.running_(mean|var)$', k):
+                                del state_dict[k]
+                        style_model.load_state_dict(state_dict)
+                        style_model.to(device)
+                        style_model.eval()
+                        if args.export_onnx:
+                            assert args.export_onnx.endswith(".onnx"), "Export model file should end with .onnx"
+                            output = torch.onnx._export(
+                                style_model, content_image, args.export_onnx, opset_version=11,
+                            ).cpu()
+                        else:
+                            output = style_model(content_image).cpu()
+                utils.save_image(output_file, output[0])
 
 
 def stylize_onnx(content_image, args):
