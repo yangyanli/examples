@@ -66,50 +66,55 @@ def train(args):
         agg_content_loss = 0.
         agg_style_loss = 0.
         count = 0
-        for batch_id, (x, _) in enumerate(train_loader):
-            n_batch = len(x)
-            count += n_batch
-            optimizer.zero_grad()
+        print('%s-training at epoch %d of %d...' % (datetime.now().strftime('%H:%M:%S.%f'), e, args.epochs))
+        with tqdm(total=len(train_loader)) as pbar:
+            for batch_id, (x, _) in enumerate(train_loader):
+                pbar.set_description('%s-training at batch %d...' % (datetime.now().strftime('%H:%M:%S.%f'), batch_id))
+                pbar.update(1)
 
-            x = x.to(device)
-            y = transformer(x)
+                n_batch = len(x)
+                count += n_batch
+                optimizer.zero_grad()
 
-            y = utils.normalize_batch(y)
-            x = utils.normalize_batch(x)
+                x = x.to(device)
+                y = transformer(x)
 
-            features_y = vgg(y)
-            features_x = vgg(x)
+                y = utils.normalize_batch(y)
+                x = utils.normalize_batch(x)
 
-            content_loss = args.content_weight * mse_loss(features_y.relu2_2, features_x.relu2_2)
+                features_y = vgg(y)
+                features_x = vgg(x)
 
-            style_loss = 0.
-            for ft_y, gm_s in zip(features_y, gram_style):
-                gm_y = utils.gram_matrix(ft_y)
-                style_loss += mse_loss(gm_y, gm_s[:n_batch, :, :])
-            style_loss *= args.style_weight
+                content_loss = args.content_weight * mse_loss(features_y.relu2_2, features_x.relu2_2)
 
-            total_loss = content_loss + style_loss
-            total_loss.backward()
-            optimizer.step()
+                style_loss = 0.
+                for ft_y, gm_s in zip(features_y, gram_style):
+                    gm_y = utils.gram_matrix(ft_y)
+                    style_loss += mse_loss(gm_y, gm_s[:n_batch, :, :])
+                style_loss *= args.style_weight
 
-            agg_content_loss += content_loss.item()
-            agg_style_loss += style_loss.item()
+                total_loss = content_loss + style_loss
+                total_loss.backward()
+                optimizer.step()
 
-            if (batch_id + 1) % args.log_interval == 0:
-                mesg = "{}\tEpoch {}:\t[{}/{}]\tcontent: {:.6f}\tstyle: {:.6f}\ttotal: {:.6f}".format(
-                    time.ctime(), e + 1, count, len(train_dataset),
-                                  agg_content_loss / (batch_id + 1),
-                                  agg_style_loss / (batch_id + 1),
-                                  (agg_content_loss + agg_style_loss) / (batch_id + 1)
-                )
-                print(mesg)
+                agg_content_loss += content_loss.item()
+                agg_style_loss += style_loss.item()
 
-            if args.checkpoint_model_dir is not None and (batch_id + 1) % args.checkpoint_interval == 0:
-                transformer.eval().cpu()
-                ckpt_model_filename = "ckpt_epoch_" + str(e) + "_batch_id_" + str(batch_id + 1) + ".pth"
-                ckpt_model_path = os.path.join(args.checkpoint_model_dir, ckpt_model_filename)
-                torch.save(transformer.state_dict(), ckpt_model_path)
-                transformer.to(device).train()
+                if (batch_id + 1) % args.log_interval == 0:
+                    mesg = "{}\tEpoch {}:\t[{}/{}]\tcontent: {:.6f}\tstyle: {:.6f}\ttotal: {:.6f}".format(
+                        time.ctime(), e + 1, count, len(train_dataset),
+                                      agg_content_loss / (batch_id + 1),
+                                      agg_style_loss / (batch_id + 1),
+                                      (agg_content_loss + agg_style_loss) / (batch_id + 1)
+                    )
+                    print(mesg)
+
+                if args.checkpoint_model_dir is not None and (batch_id + 1) % args.checkpoint_interval == 0:
+                    transformer.eval().cpu()
+                    ckpt_model_filename = "ckpt_epoch_" + str(e) + "_batch_id_" + str(batch_id + 1) + ".pth"
+                    ckpt_model_path = os.path.join(args.checkpoint_model_dir, ckpt_model_filename)
+                    torch.save(transformer.state_dict(), ckpt_model_path)
+                    transformer.to(device).train()
 
     # save model
     transformer.eval().cpu()
