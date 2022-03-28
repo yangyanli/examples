@@ -70,7 +70,6 @@ def train(args):
         with tqdm(total=len(train_loader)) as pbar:
             for batch_id, (x, _) in enumerate(train_loader):
                 pbar.set_description('%s-training at batch %d...' % (datetime.now().strftime('%H:%M:%S.%f'), batch_id))
-                pbar.update(1)
 
                 n_batch = len(x)
                 count += n_batch
@@ -116,6 +115,8 @@ def train(args):
                     torch.save(transformer.state_dict(), ckpt_model_path)
                     transformer.to(device).train()
 
+                pbar.update(1)
+
     # save model
     transformer.eval().cpu()
     save_model_filename = "epoch_" + str(args.epochs) + "_" + str(time.ctime()).replace(' ', '_') + "_" + str(
@@ -139,7 +140,7 @@ def stylize(args):
         model_files = [args.model]
     else:
         model_files = [os.path.join(args.model, f) for f in os.listdir(args.model) if
-                       f.endswith('.pth') or f.endswith('.onnx')]
+                       f.endswith('.pth') or f.endswith('.model') or f.endswith('.onnx')]
 
     with tqdm(total=len(content_files) * len(model_files)) as pbar:
         for content_file in content_files:
@@ -152,7 +153,7 @@ def stylize(args):
             content_image = content_image.unsqueeze(0).to(device)
 
             for model_file in model_files:
-                if len(content_files) == 1 and len(model_files) == 1:
+                if len(content_files) == 1 and len(model_files) == 1 and not os.path.isdir(args.output_image):
                     output_file = args.output_image
                 else:
                     content = os.path.splitext(os.path.basename(content_file))[0]
@@ -160,7 +161,6 @@ def stylize(args):
                     output_file = os.path.join(args.output_image, content + '+' + style + '.png')
 
                 pbar.set_description('%s-generating %s...' % (datetime.now().strftime('%H:%M:%S.%f'), output_file))
-                pbar.update(1)
 
                 if args.model.endswith(".onnx"):
                     args.model = model_file
@@ -184,6 +184,7 @@ def stylize(args):
                         else:
                             output = style_model(content_image).cpu()
                 utils.save_image(output_file, output[0])
+                pbar.update(1)
 
 
 def stylize_onnx(content_image, args):
